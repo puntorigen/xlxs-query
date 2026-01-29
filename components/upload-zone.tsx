@@ -8,12 +8,13 @@ interface UploadZoneProps {
   onUpload: (file: File) => Promise<void>;
   isLoading: boolean;
   error?: string | null;
+  loadingMessage?: string;
 }
 
 /**
  * Drag-and-drop file upload zone
  */
-export function UploadZone({ onUpload, isLoading, error }: UploadZoneProps) {
+export function UploadZone({ onUpload, isLoading, error, loadingMessage }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -68,7 +69,7 @@ export function UploadZone({ onUpload, isLoading, error }: UploadZoneProps) {
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
             <div>
               <p className="text-lg font-medium text-slate-700">
-                Processing your spreadsheet...
+                {loadingMessage || 'Processing your spreadsheet...'}
               </p>
               <p className="text-sm text-slate-500 mt-1">
                 This may take a moment for large files

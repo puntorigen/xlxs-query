@@ -159,6 +159,9 @@ export interface UploadResponse {
     sheetType: SheetType;
     rowCount: number;
     columns: ColumnInfo[];
+    /** Full data for loading into client-side DuckDB */
+    data: CellValue[][];
+    /** Preview data (limited rows) for UI display */
     previewData: CellValue[][];
     /** Original data layout for matrix sheets (before normalization) */
     originalPreviewData?: CellValue[][];
@@ -168,13 +171,13 @@ export interface UploadResponse {
   error?: string;
 }
 
-/** Query API request */
+/** Query API request (legacy) */
 export interface QueryRequest {
   uploadId: string;
   question: string;
 }
 
-/** Query API response */
+/** Query API response (legacy) */
 export interface QueryResponse {
   success: boolean;
   answer?: string;
@@ -183,5 +186,44 @@ export interface QueryResponse {
   resultPreview?: CellValue[][];
   columnNames?: string[];
   assumptions?: string;
+  error?: string;
+}
+
+// ============================================================================
+// Stateless API Types (for Vercel deployment)
+// ============================================================================
+
+/** SQL generation request */
+export interface SqlGenerationRequest {
+  question: string;
+  schema: SchemaInfo;
+  conversationHistory?: ConversationEntry[];
+  /** For retry attempts: previous SQL that failed */
+  previousSql?: string;
+  /** For retry attempts: error message from previous attempt */
+  previousError?: string;
+}
+
+/** SQL generation response */
+export interface SqlGenerationResponse {
+  success: boolean;
+  sql?: string;
+  assumptions?: string;
+  tablesUsed?: string[];
+  error?: string;
+}
+
+/** Answer generation request */
+export interface AnswerGenerationRequest {
+  question: string;
+  columns: string[];
+  rows: CellValue[][];
+  rowCount: number;
+}
+
+/** Answer generation response */
+export interface AnswerGenerationResponse {
+  success: boolean;
+  answer?: string;
   error?: string;
 }

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { FileSpreadsheet, Upload, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { FileSpreadsheet, Upload, ToggleLeft, ToggleRight, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { UploadZone } from '@/components/upload-zone';
@@ -9,7 +9,8 @@ import { SheetTabs } from '@/components/sheet-tabs';
 import { DataGrid } from '@/components/data-grid';
 import { SchemaPanel } from '@/components/schema-panel';
 import { ChatPanel } from '@/components/chat-panel';
-import type { UploadResponse, QueryResponse, CellValue, ColumnInfo, Relationship, SheetType, AggregateInfo } from '@/lib/types';
+import { useBrowserDb } from '@/hooks/use-browser-db';
+import type { UploadResponse, QueryResponse, CellValue, ColumnInfo, Relationship, SheetType, AggregateInfo, SchemaInfo } from '@/lib/types';
 
 // ============================================================================
 // Types
@@ -20,6 +21,8 @@ interface SheetData {
   sheetType: SheetType;
   rowCount: number;
   columns: ColumnInfo[];
+  /** Full data for DuckDB loading */
+  data: CellValue[][];
   previewData: CellValue[][];
   /** Original layout for matrix sheets (before normalization) */
   originalPreviewData?: CellValue[][];
@@ -31,9 +34,11 @@ interface AppState {
   uploadId: string | null;
   fileName: string | null;
   sheets: SheetData[];
+  schema: SchemaInfo | null;
   relationships: Relationship[];
   activeSheet: string | null;
   isLoading: boolean;
+  isDbLoading: boolean;
   error: string | null;
   /** For matrix sheets: show original (true) or normalized (false) view */
   showOriginalView: boolean;
@@ -48,12 +53,24 @@ export default function Home() {
     uploadId: null,
     fileName: null,
     sheets: [],
+    schema: null,
     relationships: [],
     activeSheet: null,
     isLoading: false,
+    isDbLoading: false,
     error: null,
     showOriginalView: true, // Default to showing original view
   });
+
+  // Browser DuckDB hook
+  const browserDb = useBrowserDb();
+
+  // Initialize DuckDB on first render
+  useEffect(() => {
+    if (!browserDb.isInitialized && !browserDb.isLoading) {
+      browserDb.initialize();
+    }
+  }, [browserDb]);
 
   // Get current sheet data
   const currentSheet = state.sheets.find((s) => s.name === state.activeSheet);
@@ -63,9 +80,15 @@ export default function Home() {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
+      // Ensure DuckDB is initialized
+      if (!browserDb.isInitialized) {
+        await browserDb.initialize();
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
+      // Step 1: Upload and parse file on server
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
@@ -77,13 +100,26 @@ export default function Home() {
         throw new Error(result.error || 'Upload failed');
       }
 
+      // Step 2: Load data into client-side DuckDB
+      setState((prev) => ({ ...prev, isDbLoading: true }));
+
+      const sheetsToLoad = (result.sheets || []).map((s) => ({
+        name: s.name,
+        columns: s.columns,
+        data: s.data,
+      }));
+
+      await browserDb.loadSheets(sheetsToLoad, result.schema!);
+
       setState({
         uploadId: result.uploadId,
         fileName: file.name,
         sheets: result.sheets || [],
+        schema: result.schema || null,
         relationships: result.schema?.relationships || [],
         activeSheet: result.sheets?.[0]?.name || null,
         isLoading: false,
+        isDbLoading: false,
         error: null,
         showOriginalView: true,
       });
@@ -91,30 +127,21 @@ export default function Home() {
       setState((prev) => ({
         ...prev,
         isLoading: false,
+        isDbLoading: false,
         error: error instanceof Error ? error.message : 'Upload failed',
       }));
     }
-  }, []);
+  }, [browserDb]);
 
-  // Handle query
+  // Handle query using client-side DuckDB
   const handleQuery = useCallback(
     async (question: string): Promise<QueryResponse> => {
-      if (!state.uploadId) {
-        return { success: false, error: 'No file uploaded' };
+      if (!state.uploadId || !browserDb.isInitialized) {
+        return { success: false, error: 'No file uploaded or database not ready' };
       }
 
       try {
-        const response = await fetch('/api/query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            uploadId: state.uploadId,
-            question,
-          }),
-        });
-
-        const result: QueryResponse = await response.json();
-        return result;
+        return await browserDb.executeQuery(question);
       } catch (error) {
         return {
           success: false,
@@ -122,22 +149,25 @@ export default function Home() {
         };
       }
     },
-    [state.uploadId]
+    [state.uploadId, browserDb]
   );
 
   // Handle new upload (reset state)
-  const handleNewUpload = useCallback(() => {
+  const handleNewUpload = useCallback(async () => {
+    await browserDb.reset();
     setState({
       uploadId: null,
       fileName: null,
       sheets: [],
+      schema: null,
       relationships: [],
       activeSheet: null,
       isLoading: false,
+      isDbLoading: false,
       error: null,
       showOriginalView: true,
     });
-  }, []);
+  }, [browserDb]);
 
   // Render upload view
   if (!state.uploadId) {
@@ -159,6 +189,13 @@ export default function Home() {
                 </p>
               </div>
             </div>
+            {/* DuckDB status indicator */}
+            {!browserDb.isInitialized && (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Initializing database...</span>
+              </div>
+            )}
           </div>
         </header>
 
@@ -166,8 +203,15 @@ export default function Home() {
         <div className="container mx-auto px-4 py-16">
           <UploadZone
             onUpload={handleUpload}
-            isLoading={state.isLoading}
-            error={state.error}
+            isLoading={state.isLoading || state.isDbLoading}
+            error={state.error || browserDb.error}
+            loadingMessage={
+              state.isDbLoading
+                ? 'Loading data into database...'
+                : state.isLoading
+                ? 'Processing file...'
+                : undefined
+            }
           />
         </div>
       </main>
@@ -305,7 +349,7 @@ export default function Home() {
 
           {/* Right Panel: Chat */}
           <Card className="flex flex-col overflow-hidden h-full max-h-[calc(100vh-8rem)]">
-            <ChatPanel onQuery={handleQuery} disabled={!state.uploadId} />
+            <ChatPanel onQuery={handleQuery} disabled={!state.uploadId || !browserDb.isInitialized} />
           </Card>
         </div>
       </div>
