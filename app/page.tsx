@@ -304,7 +304,7 @@ export default function Home() {
           </div>
 
           {/* Right Panel: Chat */}
-          <Card className="flex flex-col overflow-hidden">
+          <Card className="flex flex-col overflow-hidden h-full max-h-[calc(100vh-8rem)]">
             <ChatPanel onQuery={handleQuery} disabled={!state.uploadId} />
           </Card>
         </div>
