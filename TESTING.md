@@ -20,7 +20,7 @@ npm run dev
 
 ## Test File
 
-Place your test Excel file in the `test-documents/` folder. A typical company data file might contain:
+Upload any `.xlsx` file through the web interface. A typical company data file might contain:
 
 | Sheet | Type | Rows | Description |
 |-------|------|------|-------------|

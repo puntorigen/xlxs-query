@@ -133,8 +133,7 @@ xlsx-query/
 │   │   ├── executor.ts
 │   │   └── attribution.ts
 │   └── session.ts            # Session management
-├── components/               # UI components
-└── test-documents/           # Sample Excel files
+└── components/               # UI components
 ```
 
 ## Known Limitations
