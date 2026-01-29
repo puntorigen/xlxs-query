@@ -95,7 +95,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Example Queries
 
-With the included `company_data.xlsx` test file:
+With a typical company data Excel file:
 
 - "What is the total sales revenue?"
 - "Which product category had the highest sales?"

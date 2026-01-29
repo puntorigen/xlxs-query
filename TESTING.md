@@ -20,7 +20,7 @@ npm run dev
 
 ## Test File
 
-Use the included `test-documents/company_data.xlsx` which contains:
+Place your test Excel file in the `test-documents/` folder. A typical company data file might contain:
 
 | Sheet | Type | Rows | Description |
 |-------|------|------|-------------|
