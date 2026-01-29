@@ -744,66 +744,67 @@ GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ## 10. Implementation Phases
 
-### Phase 1: Project Setup (30 min)
+### Phase 1: Project Setup (30 min) ✅
 
-- [ ] Initialize Next.js with TypeScript
-- [ ] Install dependencies
-- [ ] Configure Tailwind CSS
-- [ ] Add shadcn/ui components (button, card, tabs, input)
-- [ ] Create `.env.local.example`
-- [ ] Set up basic layout
+- [x] Initialize Next.js with TypeScript
+- [x] Install dependencies
+- [x] Configure Tailwind CSS
+- [x] Add shadcn/ui components (button, card, tabs, input, badge, scroll-area)
+- [x] Create `.env.local.example`
+- [x] Set up basic layout
 
-### Phase 2: Excel Processing (1.5 hr)
+### Phase 2: Excel Processing (1.5 hr) ✅
 
-- [ ] Implement `parser.ts` - SheetJS with cellFormula
-- [ ] Implement `formula-evaluator.ts` - HyperFormula integration
-- [ ] Implement `header-detector.ts` - scoring algorithm
-- [ ] Implement `sheet-classifier.ts` - table vs matrix
-- [ ] Implement `matrix-normalizer.ts` - unpivot logic
-- [ ] Unit test with `company_data.xlsx`
+- [x] Implement `parser.ts` - SheetJS with cellFormula
+- [x] Implement `formula-evaluator.ts` - HyperFormula integration
+- [x] Implement `header-detector.ts` - scoring algorithm
+- [x] Implement `sheet-classifier.ts` - table vs matrix
+- [x] Implement `matrix-normalizer.ts` - unpivot logic
+- [x] Implement `processor.ts` - main orchestrator
+- [ ] Unit test with `company_data.xlsx` (will test via API)
 
-### Phase 3: Database Layer (45 min)
+### Phase 3: Database Layer (45 min) ✅
 
-- [ ] Implement `duckdb.ts` - session database class
-- [ ] Implement `loader.ts` - create tables, insert data
-- [ ] Implement `relationships.ts` - FK detection
-- [ ] Test cross-sheet queries manually
+- [x] Implement `duckdb.ts` - session database class
+- [x] Implement `loader.ts` - create tables, insert data
+- [x] Implement `relationships.ts` - FK detection
+- [ ] Test cross-sheet queries manually (will test via API)
 
-### Phase 4: Query Engine (1.5 hr)
+### Phase 4: Query Engine (1.5 hr) ✅
 
-- [ ] Implement `groq-client.ts` - API client setup
-- [ ] Implement `prompts.ts` - system prompt
-- [ ] Implement `schema-context.ts` - build schema string
-- [ ] Implement `validator.ts` - SQL safety checks
-- [ ] Implement `executor.ts` - execute + retry logic
-- [ ] Implement `attribution.ts` - extract tables from SQL
-- [ ] Implement `session.ts` - conversation history
+- [x] Implement `groq-client.ts` - API client setup
+- [x] Implement `prompts.ts` - system prompt
+- [x] Implement `schema-context.ts` - build schema string
+- [x] Implement `validator.ts` - SQL safety checks
+- [x] Implement `executor.ts` - execute + retry logic
+- [x] Implement `attribution.ts` - extract tables from SQL
+- [x] Implement `session.ts` - conversation history
 
-### Phase 5: API Routes (30 min)
+### Phase 5: API Routes (30 min) ✅
 
-- [ ] Implement `POST /api/upload`
-- [ ] Implement `POST /api/query`
-- [ ] Test endpoints with Postman/curl
+- [x] Implement `POST /api/upload`
+- [x] Implement `POST /api/query`
+- [ ] Test endpoints with Postman/curl (will test via UI)
 
-### Phase 6: Frontend UI (1.5 hr)
+### Phase 6: Frontend UI (1.5 hr) ✅
 
-- [ ] Implement `upload-zone.tsx` - drag-drop upload
-- [ ] Implement `sheet-tabs.tsx` - sheet navigation
-- [ ] Implement `data-grid.tsx` - simple table preview
-- [ ] Implement `schema-panel.tsx` - column info
-- [ ] Implement `chat-panel.tsx` - input + history
-- [ ] Implement `answer-card.tsx` - result display
-- [ ] Implement main `page.tsx` - wire everything together
-- [ ] Add loading states and error handling
+- [x] Implement `upload-zone.tsx` - drag-drop upload
+- [x] Implement `sheet-tabs.tsx` - sheet navigation
+- [x] Implement `data-grid.tsx` - simple table preview
+- [x] Implement `schema-panel.tsx` - column info
+- [x] Implement `chat-panel.tsx` - input + history
+- [x] Implement `answer-card.tsx` - result display
+- [x] Implement main `page.tsx` - wire everything together
+- [x] Add loading states and error handling
 
-### Phase 7: Polish & Test (30 min)
+### Phase 7: Polish & Test (30 min) ✅
 
-- [ ] Test full flow with `company_data.xlsx`
-- [ ] Test cross-sheet queries
-- [ ] Test follow-up questions
-- [ ] Test error recovery
-- [ ] Write README with setup instructions
-- [ ] Document known limitations
+- [x] Test full flow with `company_data.xlsx`
+- [x] Test cross-sheet queries
+- [x] Test follow-up questions
+- [x] Test error recovery
+- [x] Write README with setup instructions
+- [x] Document known limitations
 
 **Total Estimated Time: ~6 hours**
 
