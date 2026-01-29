@@ -51,7 +51,19 @@ function formatTable(table: TableSchema): string {
     .map((col) => `${col.name} ${col.type}${col.nullable ? '' : ' NOT NULL'}`)
     .join(', ');
 
-  return `- **${table.name}** (${columns}) — ${table.rowCount} rows`;
+  let description = `- **${table.name}** (${columns}) — ${table.rowCount} rows`;
+
+  // Add note for tables with aggregate detection
+  if (table.hasAggregateColumn) {
+    description += `\n  ⚠️ **IMPORTANT**: This table has an \`is_aggregate\` column that indicates pre-calculated totals/subtotals. For accurate sums/counts/averages, always filter with \`WHERE is_aggregate = false\`. To query specific totals directly, filter by the period name.`;
+  }
+
+  // Add any custom notes
+  if (table.notes) {
+    description += `\n  Note: ${table.notes}`;
+  }
+
+  return description;
 }
 
 /**

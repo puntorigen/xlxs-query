@@ -36,10 +36,14 @@ export async function loadWorkbookIntoDatabase(
     try {
       await db.loadSheet(sheet);
 
+      // Check if this is a matrix sheet with aggregate detection
+      const hasAggregateColumn = sheet.columns.some(col => col.name === 'is_aggregate');
+
       tables.push({
         name: sheet.name,
         columns: sheet.columns,
         rowCount: sheet.rowCount,
+        hasAggregateColumn,
       });
     } catch (error) {
       console.error(`[Loader] Error loading sheet ${sheet.name}:`, error);
@@ -89,6 +93,8 @@ export async function enrichSchemaWithSamples(
     enrichedTables.push({
       ...table,
       columns: enrichedColumns,
+      // Preserve hasAggregateColumn flag
+      hasAggregateColumn: table.hasAggregateColumn,
     });
   }
 

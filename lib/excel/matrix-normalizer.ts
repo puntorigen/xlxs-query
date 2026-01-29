@@ -11,15 +11,17 @@
  * |           | Travel   | 25000     | 30000     | 55000    |
  * | Sales Tot |          | 220000    | 233000    | 453000   |
  * 
- * OUTPUT:
- * | department | category | period    | amount |
- * | Sales      | Salaries | Q1 Budget | 180000 |
- * | Sales      | Salaries | Q2 Budget | 185000 |
- * | Sales      | Travel   | Q1 Budget | 25000  |
- * | Sales      | Travel   | Q2 Budget | 30000  |
+ * OUTPUT (with LLM-detected aggregates):
+ * | department | category | period    | amount | is_aggregate |
+ * | Sales      | Salaries | Q1 Budget | 180000 | false        |
+ * | Sales      | Salaries | Q2 Budget | 185000 | false        |
+ * | Sales      | Salaries | H1 Total  | 365000 | true         |  <- aggregate column
+ * | Sales      | Travel   | Q1 Budget | 25000  | false        |
+ * | Sales      | Travel   | Q2 Budget | 30000  | false        |
  */
 
 import type { CellValue, ColumnInfo } from '@/lib/types';
+import type { MatrixAnalysis } from '@/lib/llm/matrix-analyzer';
 
 // ============================================================================
 // Types
@@ -29,6 +31,8 @@ export interface NormalizedMatrix {
   columns: ColumnInfo[];
   data: CellValue[][];
   originalHeaders: string[];
+  /** Whether this matrix has aggregate detection enabled */
+  hasAggregateColumn: boolean;
 }
 
 export interface MatrixConfig {
@@ -46,17 +50,19 @@ export interface MatrixConfig {
 
 /**
  * Normalize a matrix sheet into long format
+ * Now accepts optional LLM analysis for aggregate detection
  */
 export function normalizeMatrix(
   data: CellValue[][],
-  config: MatrixConfig
+  config: MatrixConfig,
+  analysis?: MatrixAnalysis
 ): NormalizedMatrix {
   const { periodHeaderRow, periodHeaders } = config;
 
   // Get the header row
   const headerRow = data[periodHeaderRow] || [];
   
-  // Find period columns (columns with period headers)
+  // Find ALL period columns (including potential aggregates)
   const periodColumns = findPeriodColumns(headerRow, periodHeaders);
 
   if (periodColumns.length === 0) {
@@ -64,33 +70,54 @@ export function normalizeMatrix(
     return createBasicNormalization(data, periodHeaderRow);
   }
 
+  // Determine which columns are aggregates (from LLM analysis)
+  const aggregateColumnIndices = new Set(analysis?.aggregateColumns || []);
+  const aggregateRowIndices = new Set(analysis?.aggregateRows || []);
+  
+  // Map period column indices to whether they're aggregates
+  // The analysis indices are relative to numeric columns, so we need to map
+  const periodColumnAggregateStatus = periodColumns.map((col, idx) => {
+    // Check if this period column's position matches any aggregate column
+    return aggregateColumnIndices.has(col.index) || aggregateColumnIndices.has(idx);
+  });
+
   // Process data rows into normalized format
   const normalizedData: CellValue[][] = [];
   let currentDepartment: string | null = null;
+  let dataRowIndex = 0; // Track row index relative to data start
 
   // Start processing from row after header
   for (let rowIdx = periodHeaderRow + 1; rowIdx < data.length; rowIdx++) {
     const row = data[rowIdx];
     
     // Skip empty rows
-    if (isEmptyRow(row)) continue;
+    if (isEmptyRow(row)) {
+      dataRowIndex++;
+      continue;
+    }
 
     // Check if this is a section marker row (department header)
     const sectionMarker = detectSectionMarker(row);
     if (sectionMarker) {
       currentDepartment = formatDepartmentName(sectionMarker);
+      dataRowIndex++;
       continue;
     }
 
-    // Skip total/subtotal rows
-    if (isTotalRow(row)) continue;
+    // Check if this row is marked as aggregate by LLM
+    const isAggregateRow = aggregateRowIndices.has(dataRowIndex) || 
+                           aggregateRowIndices.has(rowIdx - periodHeaderRow - 1);
 
     // Get the category (usually in column B, index 1)
     const category = findCategory(row);
-    if (!category) continue;
+    if (!category) {
+      dataRowIndex++;
+      continue;
+    }
 
     // Create one row per period column
-    for (const periodCol of periodColumns) {
+    for (let i = 0; i < periodColumns.length; i++) {
+      const periodCol = periodColumns[i];
       const value = row[periodCol.index];
       
       // Skip empty/null values
@@ -99,18 +126,25 @@ export function normalizeMatrix(
       // Skip non-numeric values in what should be numeric columns
       if (typeof value !== 'number') continue;
 
+      // Determine if this cell is an aggregate
+      const isAggregateColumn = periodColumnAggregateStatus[i];
+      const isAggregate = isAggregateRow || isAggregateColumn;
+
       const normalizedRow: CellValue[] = [
         currentDepartment || 'Unknown',
         category,
         periodCol.header,
         value,
+        isAggregate, // is_aggregate column
       ];
 
       normalizedData.push(normalizedRow);
     }
+
+    dataRowIndex++;
   }
 
-  // Build column definitions
+  // Build column definitions (now with is_aggregate)
   const columns: ColumnInfo[] = [
     {
       name: 'department',
@@ -140,12 +174,23 @@ export function normalizeMatrix(
       nullable: false,
       sampleValues: [],
     },
+    {
+      name: 'is_aggregate',
+      originalName: 'Is Aggregate',
+      type: 'BOOLEAN',
+      nullable: false,
+      sampleValues: [],
+    },
   ];
+
+  const hasAggregates = analysis && 
+    (analysis.aggregateColumns.length > 0 || analysis.aggregateRows.length > 0);
 
   return {
     columns,
     data: normalizedData,
     originalHeaders: periodColumns.map(p => p.header),
+    hasAggregateColumn: hasAggregates || false,
   };
 }
 
@@ -160,6 +205,7 @@ interface PeriodColumn {
 
 /**
  * Find columns that contain period data
+ * Now includes ALL period-like columns (aggregates will be marked, not excluded)
  */
 function findPeriodColumns(headerRow: CellValue[], periodHeaders: string[]): PeriodColumn[] {
   const columns: PeriodColumn[] = [];
@@ -167,10 +213,8 @@ function findPeriodColumns(headerRow: CellValue[], periodHeaders: string[]): Per
   for (let i = 0; i < headerRow.length; i++) {
     const cell = headerRow[i];
     if (typeof cell === 'string' && cell.trim() !== '') {
-      // Check if this header is in our detected period headers
-      // or matches common patterns (but skip "Total" columns)
-      if (periodHeaders.includes(cell) || 
-          (isPeriodLikeHeader(cell) && !isTotalHeader(cell))) {
+      // Include if it's in detected period headers OR looks like a period header
+      if (periodHeaders.includes(cell) || isPeriodLikeHeader(cell)) {
         columns.push({ index: i, header: cell.trim() });
       }
     }
@@ -181,6 +225,7 @@ function findPeriodColumns(headerRow: CellValue[], periodHeaders: string[]): Per
 
 /**
  * Check if header looks like a period header
+ * Includes totals now (they'll be marked as aggregates, not excluded)
  */
 function isPeriodLikeHeader(header: string): boolean {
   const patterns = [
@@ -189,15 +234,9 @@ function isPeriodLikeHeader(header: string): boolean {
     /budget/i,
     /actual/i,
     /forecast/i,
+    /total/i, // Now included (will be marked as aggregate)
   ];
   return patterns.some(p => p.test(header));
-}
-
-/**
- * Check if header is a "Total" header (to skip)
- */
-function isTotalHeader(header: string): boolean {
-  return /\btotal\b/i.test(header);
 }
 
 /**
@@ -214,9 +253,6 @@ function isEmptyRow(row: CellValue[]): boolean {
 function detectSectionMarker(row: CellValue[]): string | null {
   const firstCell = row[0];
   
-  // Section marker should be in first column and:
-  // - All caps (SALES, MARKETING)
-  // - Or other cells in the row are mostly empty
   if (typeof firstCell !== 'string' || firstCell.trim() === '') {
     return null;
   }
@@ -224,7 +260,8 @@ function detectSectionMarker(row: CellValue[]): string | null {
   const trimmed = firstCell.trim();
   
   // Check if it's all caps (common pattern for section markers)
-  if (/^[A-Z\s]{2,}$/.test(trimmed) && !trimmed.includes('TOTAL')) {
+  // But don't treat TOTAL rows as section markers
+  if (/^[A-Z\s]{2,}$/.test(trimmed)) {
     // Verify other cells are mostly empty (not a data row)
     const otherCells = row.slice(1);
     const nonEmptyCount = otherCells.filter(c => c !== null && c !== undefined && c !== '').length;
@@ -235,15 +272,6 @@ function detectSectionMarker(row: CellValue[]): string | null {
   }
 
   return null;
-}
-
-/**
- * Check if row is a total/subtotal row
- */
-function isTotalRow(row: CellValue[]): boolean {
-  return row.some(cell => 
-    typeof cell === 'string' && /\btotal\b/i.test(cell)
-  );
 }
 
 /**
@@ -287,7 +315,7 @@ function createBasicNormalization(
   const dataRows = data.slice(headerRow + 1);
 
   const columns: ColumnInfo[] = headers
-    .filter((h, i) => h !== null && h !== '')
+    .filter((h) => h !== null && h !== '')
     .map((h) => ({
       name: sanitizeName(String(h)),
       originalName: String(h),
@@ -300,6 +328,7 @@ function createBasicNormalization(
     columns,
     data: dataRows,
     originalHeaders: [],
+    hasAggregateColumn: false,
   };
 }
 

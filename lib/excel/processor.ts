@@ -8,6 +8,7 @@ import { evaluateFormulas } from './formula-evaluator';
 import { detectHeaderRow } from './header-detector';
 import { classifySheet } from './sheet-classifier';
 import { normalizeMatrix } from './matrix-normalizer';
+import { analyzeMatrixStructure } from '@/lib/llm/matrix-analyzer';
 import type { ProcessedSheet, ProcessedWorkbook, CellValue } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 
@@ -30,8 +31,9 @@ const MAX_PREVIEW_ROWS = 100;
  * 2. Evaluate formulas with HyperFormula
  * 3. Detect header rows
  * 4. Classify sheets (table vs matrix)
- * 5. Normalize matrix sheets
- * 6. Return processed workbook
+ * 5. For matrix sheets: LLM analysis to detect aggregates
+ * 6. Normalize matrix sheets
+ * 7. Return processed workbook
  */
 export async function processExcelFile(
   buffer: ArrayBuffer,
@@ -45,12 +47,12 @@ export async function processExcelFile(
   console.log('[Processor] Evaluating formulas...');
   const evaluatedWorkbook = evaluateFormulas(rawWorkbook);
 
-  // Step 3-5: Process each sheet
+  // Step 3-6: Process each sheet (async for LLM calls)
   console.log('[Processor] Processing sheets...');
   const processedSheets: ProcessedSheet[] = [];
 
   for (const sheet of evaluatedWorkbook.sheets) {
-    const processedSheet = processSheet(sheet.name, sheet.data);
+    const processedSheet = await processSheet(sheet.name, sheet.data);
     processedSheets.push(processedSheet);
   }
 
@@ -69,7 +71,7 @@ export async function processExcelFile(
 /**
  * Process a single sheet
  */
-function processSheet(name: string, data: CellValue[][]): ProcessedSheet {
+async function processSheet(name: string, data: CellValue[][]): Promise<ProcessedSheet> {
   // Handle empty sheets
   if (data.length === 0) {
     return createEmptySheet(name);
@@ -87,9 +89,9 @@ function processSheet(name: string, data: CellValue[][]): ProcessedSheet {
     `[Processor] Sheet "${name}": Type "${classification.sheetType}" (confidence: ${classification.confidence}%)`
   );
 
-  // Step 5: Normalize if matrix
+  // Step 5-6: Normalize if matrix (with LLM analysis)
   if (classification.sheetType === 'matrix') {
-    return processMatrixSheet(name, data, headerDetection, classification);
+    return await processMatrixSheet(name, data, headerDetection, classification);
   }
 
   // Process as regular table
@@ -132,8 +134,9 @@ function processTableSheet(
 
 /**
  * Process a matrix/report sheet
+ * Now includes LLM analysis to detect aggregate columns/rows
  */
-function processMatrixSheet(
+async function processMatrixSheet(
   name: string,
   data: CellValue[][],
   headerDetection: { headerRow: number },
@@ -142,8 +145,8 @@ function processMatrixSheet(
     labelColumnCount?: number;
     periodHeaderRow?: number;
   }
-): ProcessedSheet {
-  // Use periodHeaderRow from classifier if available, otherwise fall back to headerDetection
+): Promise<ProcessedSheet> {
+  // Use periodHeaderRow from classifier if available
   const headerRow = classification.periodHeaderRow ?? headerDetection.headerRow;
 
   console.log(
@@ -153,12 +156,38 @@ function processMatrixSheet(
   // Store original preview data (for display in UI)
   const originalPreviewData = data.slice(0, MAX_PREVIEW_ROWS);
 
-  // Normalize matrix to long format (for querying)
-  const normalized = normalizeMatrix(data, {
-    periodHeaderRow: headerRow,
-    labelColumnCount: classification.labelColumnCount || 2,
-    periodHeaders: classification.periodHeaders || [],
-  });
+  // Step 5: LLM analysis to detect aggregate columns/rows
+  console.log(`[Processor] Matrix "${name}": Analyzing structure with LLM...`);
+  const headers = data[headerRow] || [];
+  const dataRows = data.slice(headerRow + 1);
+  
+  // Find where numeric data starts (after label columns)
+  const labelColumnCount = classification.labelColumnCount || 2;
+  
+  const analysis = await analyzeMatrixStructure(
+    headers,
+    dataRows,
+    labelColumnCount
+  );
+
+  if (analysis.aggregateColumns.length > 0 || analysis.aggregateRows.length > 0) {
+    console.log(
+      `[Processor] Matrix "${name}": Detected aggregates - ` +
+      `columns: [${analysis.aggregateColumns.join(', ')}], ` +
+      `rows: [${analysis.aggregateRows.join(', ')}]`
+    );
+  }
+
+  // Step 6: Normalize matrix to long format (with aggregate info)
+  const normalized = normalizeMatrix(
+    data,
+    {
+      periodHeaderRow: headerRow,
+      labelColumnCount,
+      periodHeaders: classification.periodHeaders || [],
+    },
+    analysis // Pass LLM analysis
+  );
 
   // Create normalized preview (for schema display)
   const headerRowData = normalized.columns.map((c) => c.originalName);

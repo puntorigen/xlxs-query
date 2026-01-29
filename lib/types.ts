@@ -81,6 +81,10 @@ export interface TableSchema {
   name: string;
   columns: ColumnInfo[];
   rowCount: number;
+  /** For matrix sheets: indicates this table has aggregate detection */
+  hasAggregateColumn?: boolean;
+  /** Notes about the table structure for LLM context */
+  notes?: string;
 }
 
 /** Complete schema information */
