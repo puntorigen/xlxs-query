@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { FileSpreadsheet, Upload } from 'lucide-react';
+import { FileSpreadsheet, Upload, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { UploadZone } from '@/components/upload-zone';
@@ -9,7 +9,7 @@ import { SheetTabs } from '@/components/sheet-tabs';
 import { DataGrid } from '@/components/data-grid';
 import { SchemaPanel } from '@/components/schema-panel';
 import { ChatPanel } from '@/components/chat-panel';
-import type { UploadResponse, QueryResponse, CellValue, ColumnInfo, Relationship, SheetType } from '@/lib/types';
+import type { UploadResponse, QueryResponse, CellValue, ColumnInfo, Relationship, SheetType, AggregateInfo } from '@/lib/types';
 
 // ============================================================================
 // Types
@@ -23,6 +23,8 @@ interface SheetData {
   previewData: CellValue[][];
   /** Original layout for matrix sheets (before normalization) */
   originalPreviewData?: CellValue[][];
+  /** Aggregate detection info for matrix sheets */
+  aggregateInfo?: AggregateInfo;
 }
 
 interface AppState {
@@ -33,6 +35,8 @@ interface AppState {
   activeSheet: string | null;
   isLoading: boolean;
   error: string | null;
+  /** For matrix sheets: show original (true) or normalized (false) view */
+  showOriginalView: boolean;
 }
 
 // ============================================================================
@@ -48,6 +52,7 @@ export default function Home() {
     activeSheet: null,
     isLoading: false,
     error: null,
+    showOriginalView: true, // Default to showing original view
   });
 
   // Get current sheet data
@@ -80,6 +85,7 @@ export default function Home() {
         activeSheet: result.sheets?.[0]?.name || null,
         isLoading: false,
         error: null,
+        showOriginalView: true,
       });
     } catch (error) {
       setState((prev) => ({
@@ -129,6 +135,7 @@ export default function Home() {
       activeSheet: null,
       isLoading: false,
       error: null,
+      showOriginalView: true,
     });
   }, []);
 
@@ -221,16 +228,52 @@ export default function Home() {
                       </span>
                     )}
                   </CardTitle>
+                  {/* Toggle for matrix sheets */}
+                  {currentSheet?.sheetType === 'matrix' && currentSheet.originalPreviewData && (
+                    <button
+                      onClick={() => setState(prev => ({ ...prev, showOriginalView: !prev.showOriginalView }))}
+                      className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                    >
+                      {state.showOriginalView ? (
+                        <ToggleLeft className="h-5 w-5" />
+                      ) : (
+                        <ToggleRight className="h-5 w-5 text-primary" />
+                      )}
+                      <span>{state.showOriginalView ? 'Original View' : 'Normalized View'}</span>
+                    </button>
+                  )}
                 </div>
               </CardHeader>
+              {/* Aggregate info banner */}
+              {currentSheet?.sheetType === 'matrix' && 
+               currentSheet.aggregateInfo && 
+               currentSheet.aggregateInfo.aggregatePeriods.length > 0 && (
+                <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2 text-sm text-amber-800">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  <span>
+                    <strong>{currentSheet.aggregateInfo.aggregatePeriods.length} aggregate column{currentSheet.aggregateInfo.aggregatePeriods.length > 1 ? 's' : ''} detected:</strong>{' '}
+                    {currentSheet.aggregateInfo.aggregatePeriods.join(', ')}.
+                    These are excluded from SUM queries to avoid double-counting.
+                  </span>
+                </div>
+              )}
               <CardContent className="p-0">
                 {currentSheet ? (
-                  // Show original layout for matrix sheets, normalized for tables
                   <DataGrid
                     data={
-                      currentSheet.sheetType === 'matrix' && currentSheet.originalPreviewData
-                        ? currentSheet.originalPreviewData
+                      currentSheet.sheetType === 'matrix'
+                        ? (state.showOriginalView && currentSheet.originalPreviewData
+                            ? currentSheet.originalPreviewData
+                            : currentSheet.previewData)
                         : currentSheet.previewData
+                    }
+                    highlightAggregates={
+                      currentSheet.sheetType === 'matrix' && state.showOriginalView
+                        ? currentSheet.aggregateInfo
+                        : undefined
+                    }
+                    showAggregateColumn={
+                      currentSheet.sheetType === 'matrix' && !state.showOriginalView
                     }
                   />
                 ) : (

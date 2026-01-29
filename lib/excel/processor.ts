@@ -209,6 +209,7 @@ async function processMatrixSheet(
     rowCount: normalized.data.length,
     previewData,
     originalPreviewData, // Keep original layout for display
+    aggregateInfo: normalized.aggregateInfo, // Pass aggregate info to UI
   };
 }
 

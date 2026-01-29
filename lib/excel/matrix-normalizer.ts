@@ -33,6 +33,15 @@ export interface NormalizedMatrix {
   originalHeaders: string[];
   /** Whether this matrix has aggregate detection enabled */
   hasAggregateColumn: boolean;
+  /** Aggregate info for UI display */
+  aggregateInfo: {
+    /** Period names that are aggregates (e.g., "H1 Total") */
+    aggregatePeriods: string[];
+    /** Column indices in original data that are aggregates */
+    aggregateColumnIndices: number[];
+    /** Row indices in original data that are aggregates (relative to header row) */
+    aggregateRowIndices: number[];
+  };
 }
 
 export interface MatrixConfig {
@@ -71,14 +80,22 @@ export function normalizeMatrix(
   }
 
   // Determine which columns are aggregates (from LLM analysis)
-  const aggregateColumnIndices = new Set(analysis?.aggregateColumns || []);
-  const aggregateRowIndices = new Set(analysis?.aggregateRows || []);
+  const aggregateColumnIndicesFromLLM = new Set(analysis?.aggregateColumns || []);
+  const aggregateRowIndicesFromLLM = new Set(analysis?.aggregateRows || []);
+  
+  // Track aggregate periods for UI display
+  const aggregatePeriods: string[] = [];
+  const aggregateColumnIndices: number[] = [];
   
   // Map period column indices to whether they're aggregates
-  // The analysis indices are relative to numeric columns, so we need to map
   const periodColumnAggregateStatus = periodColumns.map((col, idx) => {
     // Check if this period column's position matches any aggregate column
-    return aggregateColumnIndices.has(col.index) || aggregateColumnIndices.has(idx);
+    const isAggregate = aggregateColumnIndicesFromLLM.has(col.index) || aggregateColumnIndicesFromLLM.has(idx);
+    if (isAggregate) {
+      aggregatePeriods.push(col.header);
+      aggregateColumnIndices.push(col.index);
+    }
+    return isAggregate;
   });
 
   // Process data rows into normalized format
@@ -105,8 +122,8 @@ export function normalizeMatrix(
     }
 
     // Check if this row is marked as aggregate by LLM
-    const isAggregateRow = aggregateRowIndices.has(dataRowIndex) || 
-                           aggregateRowIndices.has(rowIdx - periodHeaderRow - 1);
+    const isAggregateRow = aggregateRowIndicesFromLLM.has(dataRowIndex) || 
+                           aggregateRowIndicesFromLLM.has(rowIdx - periodHeaderRow - 1);
 
     // Get the category (usually in column B, index 1)
     const category = findCategory(row);
@@ -191,6 +208,11 @@ export function normalizeMatrix(
     data: normalizedData,
     originalHeaders: periodColumns.map(p => p.header),
     hasAggregateColumn: hasAggregates || false,
+    aggregateInfo: {
+      aggregatePeriods,
+      aggregateColumnIndices,
+      aggregateRowIndices: analysis?.aggregateRows || [],
+    },
   };
 }
 
@@ -329,6 +351,11 @@ function createBasicNormalization(
     data: dataRows,
     originalHeaders: [],
     hasAggregateColumn: false,
+    aggregateInfo: {
+      aggregatePeriods: [],
+      aggregateColumnIndices: [],
+      aggregateRowIndices: [],
+    },
   };
 }
 

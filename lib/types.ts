@@ -48,6 +48,8 @@ export interface ProcessedSheet {
   previewData: CellValue[][];
   /** Original sheet data for display (before normalization) */
   originalPreviewData?: CellValue[][];
+  /** Aggregate detection info for matrix sheets */
+  aggregateInfo?: AggregateInfo;
 }
 
 /** Complete processed workbook */
@@ -137,6 +139,16 @@ export interface SessionState {
 // API Types
 // ============================================================================
 
+/** Aggregate detection info for matrix sheets */
+export interface AggregateInfo {
+  /** Period names that are aggregates (e.g., "H1 Total") */
+  aggregatePeriods: string[];
+  /** Column indices in original data that are aggregates */
+  aggregateColumnIndices: number[];
+  /** Row indices in original data that are aggregates */
+  aggregateRowIndices: number[];
+}
+
 /** Upload API response */
 export interface UploadResponse {
   success: boolean;
@@ -150,6 +162,8 @@ export interface UploadResponse {
     previewData: CellValue[][];
     /** Original data layout for matrix sheets (before normalization) */
     originalPreviewData?: CellValue[][];
+    /** Aggregate detection info for matrix sheets */
+    aggregateInfo?: AggregateInfo;
   }>;
   error?: string;
 }

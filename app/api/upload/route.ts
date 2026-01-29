@@ -85,6 +85,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
         previewData: sheet.previewData,
         // For matrix sheets, include original layout for display
         originalPreviewData: sheet.originalPreviewData,
+        // Include aggregate info for matrix sheets
+        aggregateInfo: sheet.aggregateInfo,
       })),
     };
 
