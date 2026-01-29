@@ -16,6 +16,8 @@ export interface ClassificationResult {
   periodHeaders?: string[];
   /** For matrix sheets: detected label columns count */
   labelColumnCount?: number;
+  /** For matrix sheets: the row index containing period headers */
+  periodHeaderRow?: number;
 }
 
 // ============================================================================
@@ -24,25 +26,25 @@ export interface ClassificationResult {
 
 /** Common period/time patterns in headers */
 const PERIOD_PATTERNS = [
-  /^Q[1-4]\b/i, // Q1, Q2, Q3, Q4
-  /^H[1-2]\b/i, // H1, H2
+  /^Q[1-4]\s/i, // Q1 , Q2 , etc.
+  /^Q[1-4]$/i, // Q1, Q2, etc.
+  /^H[1-2]\s/i, // H1 , H2
+  /^H[1-2]$/i, // H1, H2
   /\bQ[1-4]\b/i, // Contains Q1-Q4
   /\bH[1-2]\b/i, // Contains H1, H2
-  /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i, // Month names
+  /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i,
   /^(January|February|March|April|May|June|July|August|September|October|November|December)\b/i,
   /^\d{4}$/, // Year like 2024
   /^FY\d{2,4}/i, // Fiscal year
   /budget/i, // Budget column
   /actual/i, // Actual column
   /forecast/i, // Forecast column
-  /total/i, // Total column (in matrix context)
 ];
 
-/** Department/section markers (typically all caps or specific patterns) */
+/** Department/section markers (typically all caps) */
 const SECTION_MARKER_PATTERNS = [
   /^[A-Z]{2,}$/, // All caps words (SALES, MARKETING)
-  /^[A-Z][a-z]+\s+Department$/i, // "Sales Department"
-  /^Department:/i, // "Department: Sales"
+  /^[A-Z][a-z]+\s+Total$/i, // "Sales Total"
 ];
 
 // ============================================================================
@@ -51,32 +53,34 @@ const SECTION_MARKER_PATTERNS = [
 
 /**
  * Classify a sheet as table or matrix format
+ * This version scans for matrix patterns BEFORE relying on header detection
  */
 export function classifySheet(
   data: CellValue[][],
-  headerRow: number
+  suggestedHeaderRow: number
 ): ClassificationResult {
   if (data.length === 0) {
     return { sheetType: 'unknown', confidence: 0 };
   }
 
-  // Get header row and data below
-  const headers = data[headerRow] || [];
-  const dataRows = data.slice(headerRow + 1);
-
-  // Check for matrix characteristics
-  const matrixScore = scoreAsMatrix(headers, dataRows, data, headerRow);
-  const tableScore = scoreAsTable(headers, dataRows);
-
-  // Determine classification
-  if (matrixScore.score > tableScore.score && matrixScore.score > 20) {
+  // First: Check if this looks like a matrix by scanning for period headers
+  const matrixScan = scanForMatrixPattern(data);
+  
+  if (matrixScan.isMatrix && matrixScan.confidence > 60) {
     return {
       sheetType: 'matrix',
-      confidence: Math.min(100, matrixScore.score * 2),
-      periodHeaders: matrixScore.periodHeaders,
-      labelColumnCount: matrixScore.labelColumnCount,
+      confidence: matrixScan.confidence,
+      periodHeaders: matrixScan.periodHeaders,
+      labelColumnCount: matrixScan.labelColumnCount,
+      periodHeaderRow: matrixScan.headerRow,
     };
   }
+
+  // Fall back to standard classification using suggested header
+  const headers = data[suggestedHeaderRow] || [];
+  const dataRows = data.slice(suggestedHeaderRow + 1);
+
+  const tableScore = scoreAsTable(headers, dataRows);
 
   if (tableScore.score > 10) {
     return {
@@ -89,85 +93,126 @@ export function classifySheet(
 }
 
 // ============================================================================
-// Matrix Scoring
+// Matrix Pattern Scanner
 // ============================================================================
 
-interface MatrixScoreResult {
-  score: number;
+interface MatrixScanResult {
+  isMatrix: boolean;
+  confidence: number;
+  headerRow: number;
   periodHeaders: string[];
   labelColumnCount: number;
 }
 
 /**
- * Score how well the sheet matches matrix/report format
+ * Scan sheet for matrix/report patterns
+ * Looks for period headers and section markers
  */
-function scoreAsMatrix(
-  headers: CellValue[],
-  dataRows: CellValue[][],
-  allData: CellValue[][],
-  headerRow: number
-): MatrixScoreResult {
-  let score = 0;
-  const periodHeaders: string[] = [];
-  let labelColumnCount = 0;
+function scanForMatrixPattern(data: CellValue[][]): MatrixScanResult {
+  const result: MatrixScanResult = {
+    isMatrix: false,
+    confidence: 0,
+    headerRow: 0,
+    periodHeaders: [],
+    labelColumnCount: 2,
+  };
 
-  // 1. Check for period-like headers
-  for (let i = 0; i < headers.length; i++) {
-    const header = headers[i];
-    if (typeof header === 'string' && isPeriodHeader(header)) {
-      score += 5;
-      periodHeaders.push(header);
+  // Scan first 10 rows for period-like headers
+  const scanRows = Math.min(10, data.length);
+  
+  for (let rowIdx = 0; rowIdx < scanRows; rowIdx++) {
+    const row = data[rowIdx];
+    const periodCells: string[] = [];
+    
+    for (const cell of row) {
+      if (typeof cell === 'string' && cell.trim() !== '') {
+        if (isPeriodHeader(cell)) {
+          periodCells.push(cell);
+        }
+      }
+    }
+    
+    // If we found 2+ period headers in this row, likely a matrix
+    if (periodCells.length >= 2) {
+      result.headerRow = rowIdx;
+      result.periodHeaders = periodCells;
+      result.confidence += 40;
+      break;
     }
   }
 
-  // Multiple period headers is strong indicator
-  if (periodHeaders.length >= 2) {
-    score += 10;
+  // No period headers found
+  if (result.periodHeaders.length === 0) {
+    return result;
   }
 
-  // 2. Check for sparse first column (section markers pattern)
-  const firstColumnValues = dataRows.map((row) => row[0]);
-  const sectionMarkers = countSectionMarkers(firstColumnValues);
-  if (sectionMarkers > 0 && sectionMarkers < dataRows.length * 0.3) {
-    score += 10;
-    labelColumnCount = 1;
-  }
-
-  // 3. Check second column for labels (if first column has markers)
-  if (labelColumnCount === 1) {
-    const secondColumnValues = dataRows.map((row) => row[1]);
-    const nonEmptySecond = secondColumnValues.filter(
-      (v) => v !== null && v !== ''
-    ).length;
-    if (nonEmptySecond > dataRows.length * 0.6) {
-      labelColumnCount = 2;
-      score += 5;
+  // Check for section markers in first column (after header row)
+  const dataStartRow = result.headerRow + 1;
+  let sectionMarkerCount = 0;
+  let emptyFirstColumnCount = 0;
+  
+  for (let rowIdx = dataStartRow; rowIdx < Math.min(dataStartRow + 20, data.length); rowIdx++) {
+    const row = data[rowIdx];
+    const firstCell = row[0];
+    
+    if (firstCell === null || firstCell === '' || firstCell === undefined) {
+      emptyFirstColumnCount++;
+    } else if (typeof firstCell === 'string') {
+      if (SECTION_MARKER_PATTERNS.some(p => p.test(firstCell))) {
+        sectionMarkerCount++;
+      }
     }
   }
 
-  // 4. Check for numeric columns after label columns
-  const numericColumnCount = countNumericColumns(headers, dataRows, labelColumnCount);
-  if (numericColumnCount >= 2) {
-    score += 5;
+  // Sparse first column with some section markers = matrix pattern
+  const rowsChecked = Math.min(20, data.length - dataStartRow);
+  if (rowsChecked > 0) {
+    const emptyRatio = emptyFirstColumnCount / rowsChecked;
+    if (emptyRatio > 0.5 && sectionMarkerCount >= 1) {
+      result.confidence += 30;
+    }
   }
 
-  // 5. Check for "Total" rows
-  const hasTotalRows = dataRows.some((row) =>
-    row.some(
-      (cell) =>
-        typeof cell === 'string' && /\b(total|subtotal)\b/i.test(cell)
-    )
-  );
-  if (hasTotalRows) {
-    score += 5;
+  // Check for numeric values in columns after labels
+  const numericColCount = countNumericColumnsInData(data, result.headerRow, 2);
+  if (numericColCount >= 2) {
+    result.confidence += 20;
   }
 
-  // 6. Check if header row is not the first row (common in matrix sheets)
-  if (headerRow >= 2) {
-    score += 3;
+  result.isMatrix = result.confidence >= 50;
+  return result;
+}
+
+/**
+ * Check if a header looks like a period/time header
+ */
+function isPeriodHeader(header: string): boolean {
+  return PERIOD_PATTERNS.some((pattern) => pattern.test(header.trim()));
+}
+
+/**
+ * Count numeric columns in data portion
+ */
+function countNumericColumnsInData(
+  data: CellValue[][],
+  headerRow: number,
+  skipColumns: number
+): number {
+  const dataRows = data.slice(headerRow + 1, headerRow + 11);
+  if (dataRows.length === 0) return 0;
+
+  const colCount = Math.max(...data.map(r => r.length));
+  let numericCols = 0;
+
+  for (let col = skipColumns; col < colCount; col++) {
+    const values = dataRows.map(row => row[col]).filter(v => v !== null && v !== undefined);
+    const numericCount = values.filter(v => typeof v === 'number').length;
+    if (values.length > 0 && numericCount / values.length > 0.5) {
+      numericCols++;
+    }
   }
 
-  return { score, periodHeaders, labelColumnCount: labelColumnCount || 1 };
+  return numericCols;
 }
 
 // ============================================================================
@@ -231,51 +276,6 @@ function scoreAsTable(headers: CellValue[], dataRows: CellValue[][]): TableScore
   }
 
   return { score };
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/**
- * Check if a header looks like a period/time header
- */
-function isPeriodHeader(header: string): boolean {
-  return PERIOD_PATTERNS.some((pattern) => pattern.test(header.trim()));
-}
-
-/**
- * Count section markers in first column
- */
-function countSectionMarkers(values: CellValue[]): number {
-  return values.filter((value) => {
-    if (typeof value !== 'string' || value === '') return false;
-    return SECTION_MARKER_PATTERNS.some((pattern) => pattern.test(value));
-  }).length;
-}
-
-/**
- * Count columns that are predominantly numeric
- */
-function countNumericColumns(
-  headers: CellValue[],
-  dataRows: CellValue[][],
-  skipColumns: number
-): number {
-  let count = 0;
-
-  for (let col = skipColumns; col < headers.length; col++) {
-    const columnValues = dataRows.map((row) => row[col]);
-    const numericCount = columnValues.filter(
-      (v) => typeof v === 'number'
-    ).length;
-
-    if (numericCount > columnValues.length * 0.5) {
-      count++;
-    }
-  }
-
-  return count;
 }
 
 /**

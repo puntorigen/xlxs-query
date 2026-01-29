@@ -1,6 +1,22 @@
 /**
  * Matrix sheet normalizer
  * Converts matrix/report-style sheets into queryable long format
+ * 
+ * Example transformation:
+ * 
+ * INPUT:
+ * |           |          | Q1 Budget | Q2 Budget | H1 Total |
+ * | SALES     |          |           |           |          |
+ * |           | Salaries | 180000    | 185000    | 365000   |
+ * |           | Travel   | 25000     | 30000     | 55000    |
+ * | Sales Tot |          | 220000    | 233000    | 453000   |
+ * 
+ * OUTPUT:
+ * | department | category | period    | amount |
+ * | Sales      | Salaries | Q1 Budget | 180000 |
+ * | Sales      | Salaries | Q2 Budget | 185000 |
+ * | Sales      | Travel   | Q1 Budget | 25000  |
+ * | Sales      | Travel   | Q2 Budget | 30000  |
  */
 
 import type { CellValue, ColumnInfo } from '@/lib/types';
@@ -10,19 +26,18 @@ import type { CellValue, ColumnInfo } from '@/lib/types';
 // ============================================================================
 
 export interface NormalizedMatrix {
-  /** Column definitions for the normalized table */
   columns: ColumnInfo[];
-  /** Normalized data rows */
   data: CellValue[][];
-  /** Original period/measure headers that were unpivoted */
   originalHeaders: string[];
 }
 
-interface MatrixConfig {
-  /** Number of label columns (typically 1-2) */
-  labelColumnCount: number;
-  /** Period/measure headers detected */
+export interface MatrixConfig {
+  /** The row index containing period headers */
+  periodHeaderRow: number;
+  /** Period headers detected */
   periodHeaders: string[];
+  /** Number of label columns (typically 2: department, category) */
+  labelColumnCount: number;
 }
 
 // ============================================================================
@@ -31,105 +46,111 @@ interface MatrixConfig {
 
 /**
  * Normalize a matrix sheet into long format
- * 
- * Example transformation:
- * 
- * INPUT:
- * |       |          | Q1 Budget | Q2 Budget |
- * | SALES |          |           |           |
- * |       | Salaries | 180000    | 185000    |
- * 
- * OUTPUT:
- * | department | category | period    | amount |
- * | Sales      | Salaries | Q1 Budget | 180000 |
- * | Sales      | Salaries | Q2 Budget | 185000 |
  */
 export function normalizeMatrix(
   data: CellValue[][],
-  headerRow: number,
   config: MatrixConfig
 ): NormalizedMatrix {
-  const headers = data[headerRow] || [];
-  const dataRows = data.slice(headerRow + 1);
+  const { periodHeaderRow, periodHeaders } = config;
 
-  // Identify period columns (columns with period-like headers)
-  const periodColumns = identifyPeriodColumns(headers, config.labelColumnCount);
+  // Get the header row
+  const headerRow = data[periodHeaderRow] || [];
+  
+  // Find period columns (columns with period headers)
+  const periodColumns = findPeriodColumns(headerRow, periodHeaders);
 
   if (periodColumns.length === 0) {
-    // No period columns found, return as-is with basic structure
-    return createBasicNormalization(data, headerRow);
+    // Fall back to basic extraction
+    return createBasicNormalization(data, periodHeaderRow);
   }
 
-  // Build normalized rows
+  // Process data rows into normalized format
   const normalizedData: CellValue[][] = [];
-  let currentSection: string | null = null;
+  let currentDepartment: string | null = null;
 
-  for (const row of dataRows) {
-    // Check if this is a section marker row
-    const sectionMarker = detectSectionMarker(row, config.labelColumnCount);
+  // Start processing from row after header
+  for (let rowIdx = periodHeaderRow + 1; rowIdx < data.length; rowIdx++) {
+    const row = data[rowIdx];
+    
+    // Skip empty rows
+    if (isEmptyRow(row)) continue;
+
+    // Check if this is a section marker row (department header)
+    const sectionMarker = detectSectionMarker(row);
     if (sectionMarker) {
-      currentSection = sectionMarker;
+      currentDepartment = formatDepartmentName(sectionMarker);
       continue;
     }
 
-    // Skip empty rows and total rows
-    if (isEmptyRow(row) || isTotalRow(row)) {
-      continue;
-    }
+    // Skip total/subtotal rows
+    if (isTotalRow(row)) continue;
 
-    // Get label values
-    const labels = extractLabels(row, config.labelColumnCount);
-    if (!labels.some((l) => l !== null && l !== '')) {
-      continue;
-    }
+    // Get the category (usually in column B, index 1)
+    const category = findCategory(row);
+    if (!category) continue;
 
     // Create one row per period column
     for (const periodCol of periodColumns) {
       const value = row[periodCol.index];
+      
+      // Skip empty/null values
+      if (value === null || value === undefined || value === '') continue;
+      
+      // Skip non-numeric values in what should be numeric columns
+      if (typeof value !== 'number') continue;
 
-      // Skip if value is null/empty
-      if (value === null || value === '' || value === undefined) {
-        continue;
-      }
-
-      const normalizedRow: CellValue[] = [];
-
-      // Add section/department if detected
-      if (currentSection) {
-        normalizedRow.push(formatSectionName(currentSection));
-      }
-
-      // Add labels
-      for (const label of labels) {
-        normalizedRow.push(label);
-      }
-
-      // Add period name
-      normalizedRow.push(periodCol.header);
-
-      // Add value
-      normalizedRow.push(value);
+      const normalizedRow: CellValue[] = [
+        currentDepartment || 'Unknown',
+        category,
+        periodCol.header,
+        value,
+      ];
 
       normalizedData.push(normalizedRow);
     }
   }
 
   // Build column definitions
-  const columns = buildNormalizedColumns(
-    currentSection !== null,
-    config.labelColumnCount,
-    headers
-  );
+  const columns: ColumnInfo[] = [
+    {
+      name: 'department',
+      originalName: 'Department',
+      type: 'VARCHAR',
+      nullable: false,
+      sampleValues: [],
+    },
+    {
+      name: 'category',
+      originalName: 'Category',
+      type: 'VARCHAR',
+      nullable: false,
+      sampleValues: [],
+    },
+    {
+      name: 'period',
+      originalName: 'Period',
+      type: 'VARCHAR',
+      nullable: false,
+      sampleValues: [],
+    },
+    {
+      name: 'amount',
+      originalName: 'Amount',
+      type: 'DOUBLE',
+      nullable: false,
+      sampleValues: [],
+    },
+  ];
 
   return {
     columns,
     data: normalizedData,
-    originalHeaders: periodColumns.map((p) => p.header),
+    originalHeaders: periodColumns.map(p => p.header),
   };
 }
 
 // ============================================================================
-// Period Column Detection
+// Helper Functions
 // ============================================================================
 
 interface PeriodColumn {
@@ -138,77 +159,78 @@ interface PeriodColumn {
 }
 
 /**
- * Identify columns that contain period/measure data
+ * Find columns that contain period data
  */
-function identifyPeriodColumns(
-  headers: CellValue[],
-  skipColumns: number
-): PeriodColumn[] {
-  const periodColumns: PeriodColumn[] = [];
+function findPeriodColumns(headerRow: CellValue[], periodHeaders: string[]): PeriodColumn[] {
+  const columns: PeriodColumn[] = [];
+  
+  for (let i = 0; i < headerRow.length; i++) {
+    const cell = headerRow[i];
+    if (typeof cell === 'string' && cell.trim() !== '') {
+      // Check if this header is in our detected period headers
+      // or matches common patterns (but skip "Total" columns)
+      if (periodHeaders.includes(cell) || 
+          (isPeriodLikeHeader(cell) && !isTotalHeader(cell))) {
+        columns.push({ index: i, header: cell.trim() });
+      }
+    }
+  }
+  
+  return columns;
+}
 
-  // Period patterns to match
+/**
+ * Check if header looks like a period header
+ */
+function isPeriodLikeHeader(header: string): boolean {
   const patterns = [
-    /^Q[1-4]\b/i,
-    /\bQ[1-4]\b/i,
-    /^H[1-2]\b/i,
-    /\bH[1-2]\b/i,
+    /^Q[1-4]/i,
+    /^H[1-2]/i,
     /budget/i,
     /actual/i,
     /forecast/i,
-    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i,
-    /^\d{4}$/,
-    /^FY\d{2,4}/i,
   ];
-
-  // Skip "Total" columns as they're computed
-  const skipPatterns = [/^total$/i, /^grand\s+total$/i];
-
-  for (let i = skipColumns; i < headers.length; i++) {
-    const header = headers[i];
-    if (typeof header !== 'string' || header === '') continue;
-
-    // Check if it should be skipped
-    if (skipPatterns.some((p) => p.test(header.trim()))) {
-      continue;
-    }
-
-    // Check if it matches a period pattern
-    if (patterns.some((p) => p.test(header.trim()))) {
-      periodColumns.push({ index: i, header: header.trim() });
-    }
-  }
-
-  return periodColumns;
+  return patterns.some(p => p.test(header));
 }
 
-// ============================================================================
-// Row Processing
-// ============================================================================
+/**
+ * Check if header is a "Total" header (to skip)
+ */
+function isTotalHeader(header: string): boolean {
+  return /\btotal\b/i.test(header);
+}
 
 /**
- * Detect if a row is a section marker (like "SALES" or "MARKETING")
+ * Check if row is empty
  */
-function detectSectionMarker(
-  row: CellValue[],
-  labelColumnCount: number
-): string | null {
-  const firstCell = row[0];
+function isEmptyRow(row: CellValue[]): boolean {
+  return row.every(cell => cell === null || cell === undefined || cell === '');
+}
 
-  // Section marker is typically in first cell only
-  if (typeof firstCell !== 'string' || firstCell === '') {
+/**
+ * Detect if row is a section marker (department header)
+ * Returns the section name or null
+ */
+function detectSectionMarker(row: CellValue[]): string | null {
+  const firstCell = row[0];
+  
+  // Section marker should be in first column and:
+  // - All caps (SALES, MARKETING)
+  // - Or other cells in the row are mostly empty
+  if (typeof firstCell !== 'string' || firstCell.trim() === '') {
     return null;
   }
 
-  // Check if it's all caps (common for section markers)
-  if (/^[A-Z\s]{2,}$/.test(firstCell.trim())) {
-    // Make sure other cells in label area are empty
-    const otherLabelCells = row.slice(1, labelColumnCount);
-    const allEmpty = otherLabelCells.every(
-      (cell) => cell === null || cell === ''
-    );
-
-    if (allEmpty) {
-      return firstCell.trim();
+  const trimmed = firstCell.trim();
+  
+  // Check if it's all caps (common pattern for section markers)
+  if (/^[A-Z\s]{2,}$/.test(trimmed) && !trimmed.includes('TOTAL')) {
+    // Verify other cells are mostly empty (not a data row)
+    const otherCells = row.slice(1);
+    const nonEmptyCount = otherCells.filter(c => c !== null && c !== undefined && c !== '').length;
+    
+    if (nonEmptyCount <= 1) {
+      return trimmed;
     }
   }
 
@@ -216,112 +238,46 @@ function detectSectionMarker(
 }
 
 /**
- * Check if a row is empty
- */
-function isEmptyRow(row: CellValue[]): boolean {
-  return row.every((cell) => cell === null || cell === '');
-}
-
-/**
- * Check if a row is a total/subtotal row
+ * Check if row is a total/subtotal row
  */
 function isTotalRow(row: CellValue[]): boolean {
-  return row.some(
-    (cell) =>
-      typeof cell === 'string' && /\b(total|subtotal)\b/i.test(cell)
+  return row.some(cell => 
+    typeof cell === 'string' && /\btotal\b/i.test(cell)
   );
 }
 
 /**
- * Extract label values from a row
+ * Find the category value in a row (typically column B)
  */
-function extractLabels(row: CellValue[], labelColumnCount: number): CellValue[] {
-  const labels: CellValue[] = [];
-
-  for (let i = 0; i < labelColumnCount; i++) {
-    const value = row[i];
-    // Use the last non-empty label found
-    if (value !== null && value !== '') {
-      labels.push(value);
-    } else if (i === 0) {
-      // First column empty - might need to use previous section
-      labels.push(null);
+function findCategory(row: CellValue[]): string | null {
+  // Try column B first (index 1)
+  if (row[1] && typeof row[1] === 'string' && row[1].trim() !== '') {
+    return row[1].trim();
+  }
+  
+  // Fall back to first non-empty string
+  for (let i = 0; i < Math.min(3, row.length); i++) {
+    const cell = row[i];
+    if (typeof cell === 'string' && cell.trim() !== '') {
+      return cell.trim();
     }
   }
-
-  // Filter to get actual labels (remove leading nulls if second col has value)
-  if (labels.length === 2 && labels[0] === null && labels[1] !== null) {
-    return [labels[1]];
-  }
-
-  return labels.filter((l) => l !== null && l !== '');
+  
+  return null;
 }
 
 /**
- * Format section name for consistency
+ * Format department name (SALES -> Sales)
  */
-function formatSectionName(name: string): string {
-  // Convert "SALES" to "Sales"
-  return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-}
-
-// ============================================================================
-// Column Building
-// ============================================================================
-
-/**
- * Build column definitions for normalized table
- */
-function buildNormalizedColumns(
-  hasSection: boolean,
-  labelColumnCount: number,
-  originalHeaders: CellValue[]
-): ColumnInfo[] {
-  const columns: ColumnInfo[] = [];
-
-  // Department/Section column (if detected)
-  if (hasSection) {
-    columns.push({
-      name: 'department',
-      originalName: 'Department',
-      type: 'VARCHAR',
-      nullable: false,
-      sampleValues: [],
-    });
+function formatDepartmentName(name: string): string {
+  if (/^[A-Z\s]+$/.test(name)) {
+    return name.charAt(0) + name.slice(1).toLowerCase();
   }
-
-  // Category column (from label columns)
-  columns.push({
-    name: 'category',
-    originalName: 'Category',
-    type: 'VARCHAR',
-    nullable: false,
-    sampleValues: [],
-  });
-
-  // Period column
-  columns.push({
-    name: 'period',
-    originalName: 'Period',
-    type: 'VARCHAR',
-    nullable: false,
-    sampleValues: [],
-  });
-
-  // Amount/Value column
-  columns.push({
-    name: 'amount',
-    originalName: 'Amount',
-    type: 'DOUBLE',
-    nullable: true,
-    sampleValues: [],
-  });
-
-  return columns;
+  return name;
 }
 
 /**
- * Create basic normalization when no period columns detected
+ * Create basic normalization when pattern detection fails
  */
 function createBasicNormalization(
   data: CellValue[][],
@@ -331,8 +287,8 @@ function createBasicNormalization(
   const dataRows = data.slice(headerRow + 1);
 
   const columns: ColumnInfo[] = headers
-    .filter((h) => h !== null && h !== '')
-    .map((h, i) => ({
+    .filter((h, i) => h !== null && h !== '')
+    .map((h) => ({
       name: sanitizeName(String(h)),
       originalName: String(h),
       type: 'VARCHAR' as const,
@@ -348,7 +304,7 @@ function createBasicNormalization(
 }
 
 /**
- * Sanitize a name for SQL
+ * Sanitize name for SQL
  */
 function sanitizeName(name: string): string {
   return name

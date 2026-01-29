@@ -16,9 +16,6 @@ import { generateId } from '@/lib/utils';
 // Session Storage
 // ============================================================================
 
-/** In-memory session store (keyed by uploadId) */
-const sessions = new Map<string, SessionData>();
-
 interface SessionData {
   db: SessionDatabase;
   workbook: ProcessedWorkbook;
@@ -29,6 +26,18 @@ interface SessionData {
 
 // Cleanup old sessions after 30 minutes of inactivity
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Use globalThis to persist sessions across Next.js module re-instantiations
+ * This is necessary because Next.js may re-import modules between API route calls
+ */
+const globalForSessions = globalThis as unknown as {
+  sessions: Map<string, SessionData> | undefined;
+};
+
+/** In-memory session store (keyed by uploadId) - persisted via globalThis */
+const sessions = globalForSessions.sessions ?? new Map<string, SessionData>();
+globalForSessions.sessions = sessions;
 
 // ============================================================================
 // Session Management
@@ -44,6 +53,8 @@ export async function createSession(
 ): Promise<string> {
   const uploadId = workbook.uploadId;
 
+  console.log(`[Session] Creating session: ${uploadId}`);
+  
   sessions.set(uploadId, {
     db,
     workbook,
@@ -51,6 +62,9 @@ export async function createSession(
     conversation: [],
     lastAccess: new Date(),
   });
+
+  console.log(`[Session] Session created. Total sessions: ${sessions.size}`);
+  console.log(`[Session] Available sessions: ${Array.from(sessions.keys()).join(', ')}`);
 
   // Schedule cleanup
   scheduleCleanup();
@@ -62,6 +76,9 @@ export async function createSession(
  * Get an existing session
  */
 export function getSession(uploadId: string): SessionData | null {
+  console.log(`[Session] getSession called for: ${uploadId}`);
+  console.log(`[Session] Available sessions: ${Array.from(sessions.keys()).join(', ') || '(none)'}`);
+  
   const session = sessions.get(uploadId);
   
   if (session) {

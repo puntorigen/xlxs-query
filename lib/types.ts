@@ -44,7 +44,10 @@ export interface ProcessedSheet {
   columns: ColumnInfo[];
   data: CellValue[][];
   rowCount: number;
+  /** Preview data (may be normalized for matrix sheets) */
   previewData: CellValue[][];
+  /** Original sheet data for display (before normalization) */
+  originalPreviewData?: CellValue[][];
 }
 
 /** Complete processed workbook */
@@ -141,6 +144,8 @@ export interface UploadResponse {
     rowCount: number;
     columns: ColumnInfo[];
     previewData: CellValue[][];
+    /** Original data layout for matrix sheets (before normalization) */
+    originalPreviewData?: CellValue[][];
   }>;
   error?: string;
 }

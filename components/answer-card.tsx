@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Table2, AlertCircle, Code } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { CellValue } from '@/lib/types';
@@ -54,7 +55,30 @@ export function AnswerCard({
           <p className="text-sm">{error}</p>
         </div>
       ) : (
-        <p className="text-lg font-medium text-slate-900">{answer}</p>
+        <div className="prose prose-slate prose-sm max-w-none">
+          <ReactMarkdown
+            components={{
+              // Style overrides for better appearance
+              p: ({ children }) => (
+                <p className="text-lg font-medium text-slate-900 mb-0">{children}</p>
+              ),
+              strong: ({ children }) => (
+                <strong className="font-semibold text-slate-900">{children}</strong>
+              ),
+              ul: ({ children }) => (
+                <ul className="list-disc list-inside text-lg text-slate-900 mt-1 mb-0">{children}</ul>
+              ),
+              ol: ({ children }) => (
+                <ol className="list-decimal list-inside text-lg text-slate-900 mt-1 mb-0">{children}</ol>
+              ),
+              li: ({ children }) => (
+                <li className="text-base text-slate-800">{children}</li>
+              ),
+            }}
+          >
+            {answer || ''}
+          </ReactMarkdown>
+        </div>
       )}
 
       {/* Tables Used */}

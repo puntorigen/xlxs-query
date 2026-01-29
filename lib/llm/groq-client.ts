@@ -113,3 +113,43 @@ export async function generateCompletion(
     return { sql: null, error: `LLM API error: ${message}` };
   }
 }
+
+// ============================================================================
+// Answer Generation
+// ============================================================================
+
+/**
+ * Generate a natural language answer from query results
+ * Returns plain text (not JSON)
+ */
+export async function generateAnswerCompletion(
+  systemPrompt: string,
+  userPrompt: string,
+  options: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  } = {}
+): Promise<string> {
+  const client = getGroqClient();
+  const model = options.model || getDefaultModel();
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: options.temperature ?? 0.3, // Slightly higher for more natural responses
+      max_tokens: options.maxTokens ?? 512,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    return content?.trim() || '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[LLM] Answer generation error:', message);
+    throw error;
+  }
+}

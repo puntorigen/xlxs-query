@@ -4,8 +4,8 @@
  */
 
 import { SessionDatabase } from '@/lib/db';
-import { generateCompletion } from '@/lib/llm/groq-client';
-import { SYSTEM_PROMPT, buildUserPrompt, buildRetryPrompt } from '@/lib/llm/prompts';
+import { generateCompletion, generateAnswerCompletion } from '@/lib/llm/groq-client';
+import { SYSTEM_PROMPT, buildUserPrompt, buildRetryPrompt, buildAnswerPrompt, ANSWER_SYSTEM_PROMPT } from '@/lib/llm/prompts';
 import { validateSql } from './validator';
 import { extractTablesFromSql } from './attribution';
 import type { SchemaInfo, ConversationEntry, QueryResult, CellValue } from '@/lib/types';
@@ -73,9 +73,16 @@ export async function executeQuery(
       // Step 3: Execute SQL
       const result = await executeWithTimeout(db, safeSql, QUERY_TIMEOUT);
 
-      // Step 4: Format result
+      // Step 4: Extract tables used
       const tablesUsed = extractTablesFromSql(safeSql, schema);
-      const answer = formatAnswer(result);
+      
+      // Step 5: Generate natural language answer using LLM
+      const answer = await generateNaturalAnswer(
+        question,
+        result.columns,
+        result.rows,
+        result.rowCount
+      );
 
       return {
         success: true,
@@ -163,28 +170,51 @@ async function executeWithTimeout(
 }
 
 // ============================================================================
-// Result Formatting
+// Natural Language Answer Generation
 // ============================================================================
 
 /**
- * Format query result as a human-readable answer
+ * Generate a natural language answer from query results using LLM
  */
-function formatAnswer(result: {
-  columns: string[];
-  rows: CellValue[][];
-  rowCount: number;
-}): string {
-  const { columns, rows, rowCount } = result;
-
-  // No results
+async function generateNaturalAnswer(
+  question: string,
+  columns: string[],
+  rows: CellValue[][],
+  rowCount: number
+): Promise<string> {
+  // For empty results, return a simple message
   if (rowCount === 0) {
-    return 'No matching data found.';
+    return 'No matching data found for your query.';
   }
 
+  try {
+    const prompt = buildAnswerPrompt(question, columns, rows, rowCount);
+    const response = await generateAnswerCompletion(ANSWER_SYSTEM_PROMPT, prompt);
+    
+    if (response && response.trim()) {
+      return response;
+    }
+    
+    // Fall back to simple formatting if LLM fails
+    return formatAnswerFallback(columns, rows, rowCount);
+  } catch (error) {
+    console.error('[Executor] Error generating natural answer:', error);
+    // Fall back to simple formatting
+    return formatAnswerFallback(columns, rows, rowCount);
+  }
+}
+
+/**
+ * Fallback answer formatting when LLM is unavailable
+ */
+function formatAnswerFallback(
+  columns: string[],
+  rows: CellValue[][],
+  rowCount: number
+): string {
   // Single value result
   if (rowCount === 1 && columns.length === 1) {
-    const value = rows[0][0];
-    return formatValue(value);
+    return formatValue(rows[0][0]);
   }
 
   // Single row, multiple columns
@@ -195,7 +225,6 @@ function formatAnswer(result: {
 
   // Multiple rows
   if (rowCount <= 5) {
-    // Show all rows
     const formatted = rows.map((row) => {
       if (columns.length === 1) {
         return formatValue(row[0]);
@@ -205,7 +234,7 @@ function formatAnswer(result: {
     return formatted.join('\n');
   }
 
-  // Many rows - summarize
+  // Many rows
   return `Found ${rowCount} results. See the table below for details.`;
 }
 

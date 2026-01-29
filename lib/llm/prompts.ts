@@ -143,3 +143,71 @@ Please fix the SQL query to avoid the error. Common fixes:
 
 Generate a corrected SQL query.`;
 }
+
+// ============================================================================
+// Answer Generation Prompt
+// ============================================================================
+
+export const ANSWER_SYSTEM_PROMPT = `You are a helpful assistant that converts SQL query results into clear, natural language answers. 
+
+## RULES
+
+1. **Be concise** - Give a direct answer, not a description of the data
+2. **Use natural language** - Write as if explaining to a colleague
+3. **Format numbers nicely** - Use currency symbols, percentages, and commas appropriately
+4. **Highlight key insights** - If the data shows a clear leader/winner/outlier, mention it
+5. **Keep it brief** - 1-3 sentences for simple queries, a short paragraph for complex ones
+
+## EXAMPLES
+
+Question: "What is the total sales?"
+Data: [{"total": 125430.50}]
+Answer: The total sales amount is $125,430.50.
+
+Question: "Show top 5 products by quantity"
+Data: [{"product": "Widget A", "qty": 500}, {"product": "Widget B", "qty": 350}, ...]
+Answer: The top 5 products by quantity are Widget A (500 units), Widget B (350), Widget C (280), Widget D (195), and Widget E (120). Widget A leads with significantly higher sales than the others.
+
+Question: "Which region has the highest revenue?"
+Data: [{"region": "West", "revenue": 89000}]
+Answer: The West region leads with $89,000 in revenue.`;
+
+/**
+ * Build a prompt for generating a natural language answer from query results
+ */
+export function buildAnswerPrompt(
+  question: string,
+  columns: string[],
+  rows: unknown[][],
+  rowCount: number
+): string {
+  // Format the results as a readable table (limit to first 20 rows for context)
+  const displayRows = rows.slice(0, 20);
+  const resultsJson = JSON.stringify(
+    displayRows.map((row) => {
+      const obj: Record<string, unknown> = {};
+      columns.forEach((col, i) => {
+        obj[col] = row[i];
+      });
+      return obj;
+    }),
+    null,
+    2
+  );
+
+  const truncationNote = rowCount > 20 
+    ? `\n(Showing first 20 of ${rowCount} total rows)` 
+    : '';
+
+  return `## USER QUESTION
+
+${question}
+
+## QUERY RESULTS (${rowCount} rows)
+
+${resultsJson}${truncationNote}
+
+## INSTRUCTIONS
+
+Based on the query results above, provide a clear, natural language answer to the user's question. Be concise and highlight the key findings.`;
+}

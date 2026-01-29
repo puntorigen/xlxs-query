@@ -45,12 +45,9 @@ export function evaluateFormulas(
   }
 
   // Create HyperFormula instance with all sheets
+  // Using default locale settings (en-US style)
   const hf = HyperFormula.buildFromSheets(sheetsData, {
     licenseKey: 'gpl-v3',
-    // Handle common locale settings
-    decimalSeparator: '.',
-    thousandSeparator: ',',
-    functionArgSeparator: ',',
   });
 
   // Get evaluated values for all sheets

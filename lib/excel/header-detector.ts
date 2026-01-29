@@ -217,8 +217,8 @@ function extractColumns(data: CellValue[][], headerRow: number): ColumnInfo[] {
       }
     }
 
-    // Infer column type
-    const columnType = inferColumnType(dataRows, colIndex);
+    // Infer column type (pass column name for ID detection)
+    const columnType = inferColumnType(dataRows, colIndex, sanitizedName);
 
     columns.push({
       name: sanitizedName,
@@ -245,12 +245,19 @@ function sanitizeColumnName(name: string): string {
 }
 
 /**
- * Infer the SQL type for a column based on data samples
+ * Infer the SQL type for a column based on column name and data samples
  */
 function inferColumnType(
   dataRows: CellValue[][],
-  colIndex: number
+  colIndex: number,
+  columnName?: string
 ): ColumnInfo['type'] {
+  // First check: ID-like column names should ALWAYS be VARCHAR
+  // IDs in Excel are almost always strings (may have prefixes, leading zeros, etc.)
+  if (columnName && isIdLikeColumnName(columnName)) {
+    return 'VARCHAR';
+  }
+
   const values: CellValue[] = [];
 
   for (const row of dataRows) {
@@ -262,6 +269,15 @@ function inferColumnType(
   }
 
   if (values.length === 0) return 'VARCHAR';
+
+  // Check if any string values contain non-numeric characters (mixed alphanumeric)
+  // These should be VARCHAR even if some values look numeric
+  const hasAlphanumericStrings = values.some(
+    (v) => typeof v === 'string' && /[a-zA-Z]/.test(v)
+  );
+  if (hasAlphanumericStrings) {
+    return 'VARCHAR';
+  }
 
   // Check types
   const typeCount = {
@@ -295,6 +311,12 @@ function inferColumnType(
   const total = values.length;
   const threshold = 0.7; // 70% of values should be this type
 
+  // If there are ANY string values that aren't dates, treat as VARCHAR
+  // This prevents type coercion issues with mixed data
+  if (typeCount.string > 0) {
+    return 'VARCHAR';
+  }
+
   if (typeCount.boolean / total >= threshold) return 'BOOLEAN';
   if (typeCount.date / total >= threshold) return 'DATE';
   if (typeCount.integer / total >= threshold && typeCount.integer === typeCount.number) {
@@ -303,6 +325,31 @@ function inferColumnType(
   if (typeCount.number / total >= threshold) return 'DOUBLE';
 
   return 'VARCHAR';
+}
+
+/**
+ * Check if a column name looks like an ID/key column
+ * ID columns should always be VARCHAR to preserve formatting
+ */
+function isIdLikeColumnName(name: string): boolean {
+  const lower = name.toLowerCase();
+  
+  // Common ID patterns
+  const idPatterns = [
+    /_id$/,      // ends with _id (rep_id, product_id)
+    /^id$/,      // exactly "id"
+    /^id_/,      // starts with id_
+    /_code$/,    // ends with _code
+    /_key$/,     // ends with _key  
+    /_ref$/,     // ends with _ref
+    /_no$/,      // ends with _no (employee_no)
+    /_number$/,  // ends with _number
+    /^sku$/i,    // SKU
+    /^upc$/i,    // UPC
+    /^isbn$/i,   // ISBN
+  ];
+
+  return idPatterns.some((pattern) => pattern.test(lower));
 }
 
 /**

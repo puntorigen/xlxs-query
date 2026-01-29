@@ -137,17 +137,30 @@ function processMatrixSheet(
   name: string,
   data: CellValue[][],
   headerDetection: { headerRow: number },
-  classification: { periodHeaders?: string[]; labelColumnCount?: number }
+  classification: { 
+    periodHeaders?: string[]; 
+    labelColumnCount?: number;
+    periodHeaderRow?: number;
+  }
 ): ProcessedSheet {
-  const { headerRow } = headerDetection;
+  // Use periodHeaderRow from classifier if available, otherwise fall back to headerDetection
+  const headerRow = classification.periodHeaderRow ?? headerDetection.headerRow;
 
-  // Normalize matrix to long format
-  const normalized = normalizeMatrix(data, headerRow, {
-    labelColumnCount: classification.labelColumnCount || 1,
+  console.log(
+    `[Processor] Matrix "${name}": Using header row ${headerRow}, periods: ${classification.periodHeaders?.join(', ')}`
+  );
+
+  // Store original preview data (for display in UI)
+  const originalPreviewData = data.slice(0, MAX_PREVIEW_ROWS);
+
+  // Normalize matrix to long format (for querying)
+  const normalized = normalizeMatrix(data, {
+    periodHeaderRow: headerRow,
+    labelColumnCount: classification.labelColumnCount || 2,
     periodHeaders: classification.periodHeaders || [],
   });
 
-  // Create preview
+  // Create normalized preview (for schema display)
   const headerRowData = normalized.columns.map((c) => c.originalName);
   const previewData = [
     headerRowData,
@@ -166,6 +179,7 @@ function processMatrixSheet(
     data: normalized.data,
     rowCount: normalized.data.length,
     previewData,
+    originalPreviewData, // Keep original layout for display
   };
 }
 

@@ -83,6 +83,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
         rowCount: sheet.rowCount,
         columns: sheet.columns,
         previewData: sheet.previewData,
+        // For matrix sheets, include original layout for display
+        originalPreviewData: sheet.originalPreviewData,
       })),
     };
 

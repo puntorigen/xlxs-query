@@ -85,7 +85,12 @@ export class SessionDatabase {
     try {
       const reader = await conn.runAndReadAll(sql);
       const columns = reader.columnNames();
-      const rows = reader.getRows() as CellValue[][];
+      const rawRows = reader.getRows();
+      
+      // Convert BigInt values to numbers (DuckDB returns BigInt for COUNT, SUM, etc.)
+      const rows = rawRows.map((row) =>
+        (row as CellValue[]).map((cell) => convertBigInt(cell))
+      );
 
       return {
         columns,
@@ -149,7 +154,7 @@ function buildCreateTableSql(tableName: string, columns: ColumnInfo[]): string {
 }
 
 /**
- * Insert data into a table
+ * Insert data into a table using batch INSERT statements
  */
 async function insertData(
   conn: any,
@@ -159,63 +164,82 @@ async function insertData(
 ): Promise<void> {
   if (data.length === 0) return;
 
-  // Build INSERT statement with placeholders
   const columnNames = columns.map((c) => `"${c.name}"`).join(', ');
-  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
-  const insertSql = `INSERT INTO "${tableName}" (${columnNames}) VALUES (${placeholders})`;
-
-  // Prepare statement
-  const stmt = await conn.prepare(insertSql);
-
-  // Insert each row
-  for (const row of data) {
-    // Bind parameters
-    for (let i = 0; i < columns.length; i++) {
-      const value = i < row.length ? row[i] : null;
-      const colType = columns[i].type;
-      bindValue(stmt, i + 1, value, colType);
-    }
-    await stmt.run();
+  
+  // Insert in batches of 100 rows for efficiency
+  const BATCH_SIZE = 100;
+  
+  for (let i = 0; i < data.length; i += BATCH_SIZE) {
+    const batch = data.slice(i, i + BATCH_SIZE);
+    
+    // Build VALUES clauses for batch
+    const valuesClauses = batch.map((row) => {
+      const values = columns.map((col, colIdx) => {
+        const value = colIdx < row.length ? row[colIdx] : null;
+        return formatValueForSql(value, col.type);
+      });
+      return `(${values.join(', ')})`;
+    });
+    
+    const insertSql = `INSERT INTO "${tableName}" (${columnNames}) VALUES ${valuesClauses.join(', ')}`;
+    await conn.run(insertSql);
   }
-
-  stmt.closeSync();
 }
 
 /**
- * Bind a value to a prepared statement parameter
+ * Format a value for SQL INSERT statement
  */
-function bindValue(
-  stmt: any,
-  index: number,
-  value: CellValue,
-  colType: string
-): void {
+function formatValueForSql(value: CellValue, colType: string): string {
   if (value === null || value === undefined || value === '') {
-    stmt.bindNull(index);
-    return;
+    return 'NULL';
   }
 
   switch (colType) {
     case 'INTEGER':
-      stmt.bindInteger(index, Math.round(Number(value)));
-      break;
+      const intVal = Number(value);
+      return isNaN(intVal) ? 'NULL' : String(Math.round(intVal));
+    
     case 'DOUBLE':
-      stmt.bindDouble(index, Number(value));
-      break;
+      const numVal = Number(value);
+      return isNaN(numVal) ? 'NULL' : String(numVal);
+    
     case 'BOOLEAN':
-      stmt.bindBoolean(index, Boolean(value));
-      break;
+      return value ? 'TRUE' : 'FALSE';
+    
     case 'DATE':
     case 'TIMESTAMP':
       if (value instanceof Date) {
-        stmt.bindVarchar(index, value.toISOString().split('T')[0]);
-      } else {
-        stmt.bindVarchar(index, String(value));
+        return `'${value.toISOString().split('T')[0]}'`;
       }
-      break;
+      return `'${escapeSqlString(String(value))}'`;
+    
     default:
-      stmt.bindVarchar(index, String(value));
+      // VARCHAR - escape single quotes
+      return `'${escapeSqlString(String(value))}'`;
   }
+}
+
+/**
+ * Escape single quotes in SQL strings
+ */
+function escapeSqlString(str: string): string {
+  return str.replace(/'/g, "''");
+}
+
+/**
+ * Convert BigInt values to numbers (DuckDB returns BigInt for aggregations)
+ * JSON.stringify can't handle BigInt, so we need to convert
+ */
+function convertBigInt(value: unknown): CellValue {
+  if (typeof value === 'bigint') {
+    // Check if value fits in a safe integer range
+    if (value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER) {
+      return Number(value);
+    }
+    // For very large numbers, convert to string to preserve precision
+    return value.toString();
+  }
+  return value as CellValue;
 }
 
 /**

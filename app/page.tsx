@@ -21,6 +21,8 @@ interface SheetData {
   rowCount: number;
   columns: ColumnInfo[];
   previewData: CellValue[][];
+  /** Original layout for matrix sheets (before normalization) */
+  originalPreviewData?: CellValue[][];
 }
 
 interface AppState {
@@ -213,12 +215,24 @@ export default function Home() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">
                     {currentSheet?.name || 'No sheet selected'}
+                    {currentSheet?.sheetType === 'matrix' && (
+                      <span className="ml-2 text-xs font-normal text-slate-500">
+                        (matrix format - normalized for queries)
+                      </span>
+                    )}
                   </CardTitle>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
                 {currentSheet ? (
-                  <DataGrid data={currentSheet.previewData} />
+                  // Show original layout for matrix sheets, normalized for tables
+                  <DataGrid
+                    data={
+                      currentSheet.sheetType === 'matrix' && currentSheet.originalPreviewData
+                        ? currentSheet.originalPreviewData
+                        : currentSheet.previewData
+                    }
+                  />
                 ) : (
                   <div className="flex items-center justify-center h-48 text-slate-500">
                     Select a sheet to preview
@@ -239,6 +253,7 @@ export default function Home() {
                     rowCount={currentSheet.rowCount}
                     relationships={state.relationships}
                     tableName={currentSheet.name}
+                    sheetType={currentSheet.sheetType}
                   />
                 </CardContent>
               </Card>

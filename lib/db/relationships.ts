@@ -121,6 +121,11 @@ function scoreFKCandidate(
   toCol: ColumnInfo,
   toTableName: string
 ): number {
+  // MUST have compatible types - FK relationships require type compatibility
+  if (!areTypesCompatible(fromCol.type, toCol.type)) {
+    return 0; // Incompatible types cannot form a FK relationship
+  }
+
   let score = 0;
 
   // Exact column name match
@@ -150,7 +155,7 @@ function scoreFKCandidate(
     score += 2;
   }
 
-  // Same data type
+  // Exact type match gets a bonus
   if (fromCol.type === toCol.type) {
     score += 1;
   }
@@ -170,6 +175,30 @@ function scoreFKCandidate(
   }
 
   return score;
+}
+
+/**
+ * Check if two column types are compatible for a FK relationship
+ * VARCHAR can only match VARCHAR, numbers can match numbers, etc.
+ */
+function areTypesCompatible(type1: ColumnInfo['type'], type2: ColumnInfo['type']): boolean {
+  // Exact match is always compatible
+  if (type1 === type2) return true;
+
+  // Numeric types are compatible with each other
+  const numericTypes = ['INTEGER', 'DOUBLE'];
+  if (numericTypes.includes(type1) && numericTypes.includes(type2)) {
+    return true;
+  }
+
+  // Date/timestamp are compatible
+  const dateTypes = ['DATE', 'TIMESTAMP'];
+  if (dateTypes.includes(type1) && dateTypes.includes(type2)) {
+    return true;
+  }
+
+  // All other combinations are incompatible
+  return false;
 }
 
 // ============================================================================

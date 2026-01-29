@@ -1,15 +1,16 @@
 'use client';
 
-import { Database, Hash, Type, Calendar, ToggleLeft, Link } from 'lucide-react';
+import { Database, Hash, Type, Calendar, ToggleLeft, Link, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { ColumnInfo, Relationship } from '@/lib/types';
+import type { ColumnInfo, Relationship, SheetType } from '@/lib/types';
 
 interface SchemaPanelProps {
   columns: ColumnInfo[];
   rowCount: number;
   relationships?: Relationship[];
   tableName: string;
+  sheetType?: SheetType;
 }
 
 /**
@@ -20,6 +21,7 @@ export function SchemaPanel({
   rowCount,
   relationships = [],
   tableName,
+  sheetType,
 }: SchemaPanelProps) {
   // Filter relationships relevant to this table
   const relevantRelationships = relationships.filter(
@@ -28,6 +30,17 @@ export function SchemaPanel({
 
   return (
     <div className="space-y-4">
+      {/* Matrix sheet notice */}
+      {sheetType === 'matrix' && (
+        <div className="flex items-start gap-2 p-2 bg-blue-50 rounded text-xs text-blue-700">
+          <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <span>
+            This is a matrix/report sheet. Data has been normalized to columns
+            (department, category, period, amount) for easier querying.
+          </span>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="flex items-center gap-2 text-sm text-slate-600">
         <Database className="h-4 w-4" />

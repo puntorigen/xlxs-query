@@ -31,14 +31,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<QueryResp
 
     const { uploadId, question } = validation.data;
 
+    console.log(`[Query] Looking for session: ${uploadId}`);
+
     // Get session
     const session = getSession(uploadId);
     if (!session) {
+      console.log(`[Query] Session not found for ID: ${uploadId}`);
       return NextResponse.json(
         { success: false, error: 'Session not found. Please upload your file again.' },
         { status: 404 }
       );
     }
+    
+    console.log(`[Query] Session found, tables: ${session.schema.tables.map(t => t.name).join(', ')}`)
 
     console.log(`[Query] Processing question: "${question.substring(0, 50)}..."`);
 
