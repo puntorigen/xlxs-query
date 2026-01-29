@@ -2,6 +2,9 @@
 
 A web application that allows users to upload Excel spreadsheets and query them using natural language. The system understands spreadsheet structure, performs accurate calculations, and provides transparent, verifiable answers.
 
+![xlsx-demo](https://github.com/user-attachments/assets/aa7030de-f9fe-41ff-a374-67490e8c426c)
+
+
 ## Features
 
 - **Excel Upload**: Drag-and-drop `.xlsx` file upload with automatic structure detection
